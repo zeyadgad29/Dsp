@@ -1,0 +1,177 @@
+import sys
+import matplotlib
+from PyQt5 import QtCore, QtWidgets, QtGui
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from PyQt5.QtWidgets import QFileDialog, QVBoxLayout,QHBoxLayout
+import pandas as pd
+import tkinter as tk
+matplotlib.use('Qt5Agg')
+
+
+class MplCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=5, height=4, dpi=100):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        self.axes = fig.add_subplot(111)
+        super(MplCanvas, self).__init__(fig)
+        self.df = None
+        self.line=None
+        self.xdata = None
+        self.ydata = None
+        self.timer = None
+        self.axes.grid(True)
+        self.window_size = 500  # Set the desired window size
+        #self.window_size => determines the number of data points to be displayed on the plot.
+        self.shift_amount = 10  # Set the number of data points to shift the window
+        self.y_min = None
+        self.y_max = None
+        self.speed =200
+    def start_canvas(self, df):
+        self.df = df
+        self.y_min = self.df.iloc[:, 1].min()
+        self.y_max = self.df.iloc[:, 1].max()
+        self.axes.set_ylim(self.y_min, self.y_max)
+        self.DataPlotted = self.window_size  # Start with initial window of data
+        self.update_data()
+        self.update_canvas()
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.upgrade_canvas)
+        self.timer.start(self.speed)  # Update plot every 100 milliseconds
+
+    def update_canvas(self):
+        self.axes.clear()  # Clear the axes before plotting
+        #self.axes.grid(True)
+        self.axes.set_facecolor('black')
+        self.axes.set_ylim(self.y_min, self.y_max)
+        if self.xdata is not None and self.ydata is not None:
+            self.line,=self.axes.plot(self.xdata, self.ydata, 'b')
+            self.line.set_color("red")
+        self.axes.set_autoscaley_on(False)  # Disable autoscaling of y-axis
+        self.axes.set_autoscalex_on(True) 
+        self.draw()
+
+    def upgrade_canvas(self):
+        self.axes.set_ylim(self.y_min, self.y_max)
+        if self.DataPlotted >= len(self.df):
+            #self.timer.stop()
+            self.DataPlotted=0
+            return
+        self.DataPlotted += self.shift_amount
+        self.update_data()
+        self.update_xlimits()
+        self.update_canvas()
+
+    def update_data(self):
+        self.axes.set_ylim(self.y_min, self.y_max)
+        #self.DataPlotted is the current index up to which the data has been plotted.
+        #self.window_size => desired window size, which determines the number of data points to be displayed on the plot.
+
+        self.xdata = self.df.iloc[self.DataPlotted  :self.DataPlotted+self.window_size ,0]
+        self.ydata = self.df.iloc[self.DataPlotted  :self.DataPlotted +self.window_size, 1]
+
+    def update_xlimits(self):
+        self.axes.set_ylim(self.y_min, self.y_max)
+        if self.xdata is not None and len(self.xdata) > 0:
+            x_min = self.xdata.iloc[0]
+            x_max = self.xdata.iloc[-1]
+            x_padding = (x_max - x_min) * 0.1  # Add 10% padding to the x-axis limits
+            self.axes.set_xlim(x_min - x_padding, x_max + x_padding)
+        elif self.xdata is not None:
+            self.axes.set_xlim(self.xdata.min(), self.xdata.max())
+
+    def zoom_in(self):
+        self.y_min = self.y_min*0.9
+        self.y_max = self.y_max*0.9
+        #self.window_size = int(self.window_size * 0.9)  # Decrease window size by 10%
+        self.update_data()
+        self.update_xlimits()
+        self.update_canvas()
+
+    def zoom_out(self):
+        #self.window_size = int(self.window_size * 1.1)  # Increase window size by 10%
+        self.y_min = self.y_min*1.1
+        self.y_max = self.y_max*1.1
+        self.update_data()
+        self.update_xlimits()
+        self.update_canvas()
+
+    def start_timer(self):
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.upgrade_canvas)
+        self.timer.start(100)  # Update plot every 100 milliseconds
+
+    def stop_timer(self):
+        if self.timer is not None:
+            self.timer.stop()
+    
+    def pause(self):
+        self.stop_timer()
+
+    def play(self):
+        self.start_timer()
+
+
+    def increase_speed(self):
+        self.speed=self.speed*0.9
+        self.timer.start(self.speed)
+    def decrease_speed(self):
+        self.speed=self.speed*1.1
+        self.timer.start(self.speed)
+    def change_color(self,string_color):
+        self.line.set_color(string_color)
+    def hide_graph(self):
+        self.line.set_color("balck")
+    def horizontal_scroll(self):
+        self.DataPlotted -= 50
+        self.update_data()
+        self.update_xlimits()
+        self.update_canvas()
+    def vertical_scroll(self):
+        self.y_min = self.y_min-0.1
+        self.y_max = self.y_max-0.1
+        self.update_data()
+        self.update_xlimits()
+        self.update_canvas()
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self, *args, **kwargs):
+        super(MainWindow, self).__init__(*args, **kwargs)
+
+        self.canvas = MplCanvas(self, width=5, height=4, dpi=100)
+        self.setCentralWidget(self.canvas)
+        self.layout = QVBoxLayout()
+        self.toolbar = self.addToolBar('Toolbar')
+        self.upload_action = QtWidgets.QAction(QtGui.QIcon('upload.png'), 'Upload CSV', self)
+        self.upload_action.triggered.connect(self.upload_csv)
+        self.toolbar.addAction(self.upload_action)
+
+        self.zoom_in_action = QtWidgets.QAction(QtGui.QIcon('zoom_in.png'), 'Zoom In', self)
+        self.zoom_in_action.triggered.connect(self.zoom_in)
+        self.toolbar.addAction(self.zoom_in_action)
+
+        self.zoom_out_action = QtWidgets.QAction(QtGui.QIcon('zoom_out.png'), 'Zoom Out', self)
+        self.zoom_out_action.triggered.connect(self.zoom_out)
+        self.toolbar.addAction(self.zoom_out_action)
+
+        self.show()
+
+    def upload_csv(self):
+        file_dialog = QFileDialog()
+        file_path, _ = file_dialog.getOpenFileName(self, 'Open CSV File', '', 'CSV Files (*.csv)')
+        if file_path:
+            df = pd.read_csv(file_path)
+            self.canvas.start_canvas(df)
+
+    def zoom_in(self):
+        self.canvas.pause()
+        
+
+    def zoom_out(self):
+        self.canvas.play()
+
+        
+
+
+app = QtWidgets.QApplication(sys.argv)
+w = MainWindow()
+app.exec_()
